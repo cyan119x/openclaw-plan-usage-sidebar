@@ -18,13 +18,14 @@ jobs:
           ref: v2026.9.3
           path: openclaw
           fetch-depth: 1
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
       - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: pnpm
           cache-dependency-path: openclaw/pnpm-lock.yaml
-      - name: Enable Corepack
-        run: corepack enable
       - name: Install OpenClaw dependencies
         working-directory: openclaw
         run: corepack pnpm install --frozen-lockfile
