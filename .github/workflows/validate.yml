@@ -1,0 +1,34 @@
+name: Validate patch
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  apply-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: openclaw/openclaw
+          ref: v2026.9.3
+          path: openclaw
+          fetch-depth: 1
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: openclaw/pnpm-lock.yaml
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install OpenClaw dependencies
+        working-directory: openclaw
+        run: corepack pnpm install --frozen-lockfile
+      - name: Apply patch
+        run: ./scripts/apply-patch.sh "$GITHUB_WORKSPACE/openclaw" "$GITHUB_WORKSPACE"
+      - name: Validate and build
+        run: ./scripts/build-control-ui.sh "$GITHUB_WORKSPACE/openclaw"

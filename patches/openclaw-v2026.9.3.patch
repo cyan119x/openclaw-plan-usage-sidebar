@@ -1,0 +1,1141 @@
+diff --git a/scripts/control-ui-mock-dev.ts b/scripts/control-ui-mock-dev.ts
+index 8a4f107d..bf180f33 100644
+--- a/scripts/control-ui-mock-dev.ts
++++ b/scripts/control-ui-mock-dev.ts
+@@ -690,6 +690,7 @@ function buildModelProviderMocks(baseTime: number) {
+     provider: "openai",
+     displayName: "OpenAI",
+     plan: "Pro",
++    accountEmail: "codex@example.test",
+     windows: [
+       { label: "5h", usedPercent: 12, resetAt: baseTime + 3.1 * hour },
+       { label: "Week", usedPercent: 44, resetAt: baseTime + 100 * hour },
+diff --git a/ui/src/components/app-sidebar.ts b/ui/src/components/app-sidebar.ts
+index d0392175..ad725210 100644
+--- a/ui/src/components/app-sidebar.ts
++++ b/ui/src/components/app-sidebar.ts
+@@ -12,6 +12,7 @@ import { t } from "../i18n/index.ts";
+ import "./session-menu.ts";
+ import "./sidebar-agent-card.ts";
+ import "./sidebar-attention.ts";
++import "./sidebar-plan-usage.ts";
+ import { createIdleImport } from "../lib/idle-import.ts";
+ import { shouldHandleNavigationClick } from "../lib/navigation-click.ts";
+ import "./theme-mode-toggle.ts";
+@@ -582,6 +583,11 @@ class AppSidebar extends AppSidebarSessionNavigationElement implements SessionLi
+       >
+         <div class="sidebar-shell" @mousedown=${beginNativeWindowDragFromTopInset}>
+           ${renderAppSidebarBrand(this)}
++          <openclaw-sidebar-plan-usage
++            .client=${this.context?.gateway.snapshot.client ?? null}
++            .connected=${this.connected}
++            .basePath=${this.basePath}
++          ></openclaw-sidebar-plan-usage>
+           <div class="sidebar-shell__content">
+             <div
+               class="sidebar-shell__body sidebar-shell__body--scroll-${
+@@ -625,7 +631,8 @@ class AppSidebar extends AppSidebarSessionNavigationElement implements SessionLi
+                   ></openclaw-plugin-contributions>
+                 </div>
+               </nav>
+-              ${renderAppSidebarOnline(this)} ${this.renderSessions()}
++              <div class="sidebar-shell__sessions">${this.renderSessions()}</div>
++              ${renderAppSidebarOnline(this)}
+             </div>
+             ${
+               this.sessionsStatusFilter === "archived"
+diff --git a/ui/src/lib/provider-quota-summary.test.ts b/ui/src/lib/provider-quota-summary.test.ts
+index 3cd9c179..40a67133 100644
+--- a/ui/src/lib/provider-quota-summary.test.ts
++++ b/ui/src/lib/provider-quota-summary.test.ts
+@@ -1,7 +1,11 @@
+ // Control UI tests cover provider quota summary behavior.
+ import { afterEach, describe, expect, it, vi } from "vitest";
+ import type { ModelAuthStatusProvider } from "../api/types.ts";
+-import { collectProviderQuotaGroups, formatQuotaReset } from "./provider-quota-summary.ts";
++import {
++  collectProviderQuotaGroups,
++  collectProviderQuotaGroupsFromUsageSummary,
++  formatQuotaReset,
++} from "./provider-quota-summary.ts";
+ 
+ describe("formatQuotaReset", () => {
+   afterEach(() => {
+@@ -149,3 +153,39 @@ describe("collectProviderQuotaGroups", () => {
+     expect(groups).toEqual([]);
+   });
+ });
++
++describe("collectProviderQuotaGroupsFromUsageSummary", () => {
++  it("projects usage.status snapshots onto the shared quota presentation contract", () => {
++    const groups = collectProviderQuotaGroupsFromUsageSummary({
++      updatedAt: 1,
++      providers: [
++        {
++          provider: "openai",
++          displayName: "OpenAI",
++          plan: "Pro",
++          accountEmail: "cyan@example.com",
++          windows: [{ label: "5h", usedPercent: 21.6, resetAt: 1_800_000_000_000 }],
++          billing: [
++            { type: "budget", label: "Monthly", used: 12, limit: 20, unit: "USD" },
++            { type: "balance", amount: 20, unit: "USD" },
++          ],
++        },
++      ],
++    });
++
++    expect(groups).toEqual([
++      {
++        providers: ["openai"],
++        displayName: "OpenAI",
++        plan: "Pro",
++        accountEmail: "cyan@example.com",
++        windows: [{ label: "5h", usedPercent: 22, resetAt: 1_800_000_000_000 }],
++        budgets: [{ label: "Monthly", used: 12, limit: 20, unit: "USD" }],
++      },
++    ]);
++  });
++
++  it("keeps successful empty usage responses distinct from a request failure", () => {
++    expect(collectProviderQuotaGroupsFromUsageSummary({ updatedAt: 1, providers: [] })).toEqual([]);
++  });
++});
+diff --git a/ui/src/lib/provider-quota-summary.ts b/ui/src/lib/provider-quota-summary.ts
+index 31010931..b797f74b 100644
+--- a/ui/src/lib/provider-quota-summary.ts
++++ b/ui/src/lib/provider-quota-summary.ts
+@@ -1,5 +1,6 @@
+ // Control UI module implements provider quota summary behavior.
+ import { asDateTimestampMs } from "@openclaw/normalization-core/number-coercion";
++import type { UsageSummary } from "../../../src/infra/provider-usage.types.js";
+ import type { ModelAuthStatusProvider, ModelAuthStatusResult } from "../api/types.ts";
+ 
+ export function formatQuotaReset(resetAt?: number): string | null {
+@@ -148,3 +149,68 @@ export function collectProviderQuotaGroups(
+   }
+   return groups.map((entry) => entry.group);
+ }
++
++/**
++ * Projects the unscoped usage.status payload onto the same display contract as
++ * the auth-status usage embed. The sidebar uses this boundary so it never
++ * needs provider credentials or provider-specific transport knowledge.
++ */
++export function collectProviderQuotaGroupsFromUsageSummary(
++  summary: UsageSummary | null,
++): ProviderQuotaGroup[] {
++  const groups: Array<{ identity: string; group: ProviderQuotaGroup }> = [];
++  for (const snapshot of summary?.providers ?? []) {
++    const windows: QuotaLimitSummary[] = snapshot.windows.map((limit) => ({
++      label: limit.label.trim(),
++      usedPercent: clampPercent(limit.usedPercent),
++      ...(limit.resetAt !== undefined ? { resetAt: limit.resetAt } : {}),
++    }));
++    const budgets: QuotaBudgetSummary[] = (snapshot.billing ?? []).flatMap((entry) => {
++      if (
++        entry.type !== "budget" ||
++        !Number.isFinite(entry.used) ||
++        !Number.isFinite(entry.limit) ||
++        entry.used < 0 ||
++        entry.limit <= 0
++      ) {
++        return [];
++      }
++      return [
++        {
++          ...(entry.label ? { label: entry.label } : {}),
++          used: entry.used,
++          limit: entry.limit,
++          unit: entry.unit,
++        },
++      ];
++    });
++    if (windows.length === 0 && budgets.length === 0) {
++      continue;
++    }
++    const identity = JSON.stringify([
++      snapshot.displayName,
++      snapshot.accountEmail ?? null,
++      windows,
++      budgets,
++    ]);
++    const existing = groups.find((entry) => entry.identity === identity);
++    if (existing) {
++      if (!existing.group.providers.includes(snapshot.provider)) {
++        existing.group.providers.push(snapshot.provider);
++      }
++      continue;
++    }
++    groups.push({
++      identity,
++      group: {
++        providers: [snapshot.provider],
++        displayName: snapshot.displayName,
++        ...(snapshot.plan ? { plan: snapshot.plan } : {}),
++        ...(snapshot.accountEmail ? { accountEmail: snapshot.accountEmail } : {}),
++        windows,
++        budgets,
++      },
++    });
++  }
++  return groups.map((entry) => entry.group);
++}
+diff --git a/ui/src/pages/chat/chat-composer-context.test.ts b/ui/src/pages/chat/chat-composer-context.test.ts
+index f1e6878c..7abf38be 100644
+--- a/ui/src/pages/chat/chat-composer-context.test.ts
++++ b/ui/src/pages/chat/chat-composer-context.test.ts
+@@ -93,6 +93,7 @@ describe("renderChatComposer context usage", () => {
+               profiles: [{ profileId: "openai", type: "oauth", status: "ok" }],
+               usage: {
+                 providerId: "openai",
++                accountEmail: "codex@example.test",
+                 windows: [
+                   { label: "Week", usedPercent: 72, resetAt: 1_700_000_000_000 + 3 * 3_600_000 },
+                 ],
+@@ -122,13 +123,18 @@ describe("renderChatComposer context usage", () => {
+       [...container.querySelectorAll(".context-usage__limit")].map((row) =>
+         row.textContent?.replace(/\s+/g, " ").trim(),
+       ),
+-    ).toEqual(["Weekly Resets 3h 72%"]);
++    ).toEqual(["Weekly Resets 3h 28% remaining"]);
+     expect(
+       container
+         .querySelector("[data-chat-usage-provider='true']")
+         ?.textContent?.replace(/\s+/g, " ")
+         .trim(),
+     ).toBe("Provider: OpenAI");
++    expect(
++      container
++        .querySelector("[data-chat-usage-account='true']")
++        ?.textContent?.trim(),
++    ).toBe("codex@example.test");
+     expect(container.querySelectorAll(".context-usage__plan-header")).toHaveLength(1);
+     const popoverText = container.querySelector(".context-usage__popover")?.textContent ?? "";
+     expect(popoverText).not.toContain("openclaw");
+@@ -161,7 +167,7 @@ describe("renderChatComposer context usage", () => {
+       "Usage Remaining",
+     );
+     expect(container.querySelector(".context-usage__bar")).toBeNull();
+-    expect(container.querySelector(".context-usage__limit")?.textContent).toContain("72%");
++    expect(container.querySelector(".context-usage__limit")?.textContent).toContain("28% remaining");
+     expect(
+       container
+         .querySelector<HTMLAnchorElement>("[data-chat-provider-usage='true']")
+@@ -229,9 +235,9 @@ describe("renderChatComposer context usage", () => {
+         row.textContent?.replace(/\s+/g, " ").trim(),
+       ),
+     ).toEqual([
+-      "5-hour limit Resets 2h 22%",
+-      "Weekly 25%",
+-      "Fable 92%",
++      "5-hour limit Resets 2h 78% remaining",
++      "Weekly 75% remaining",
++      "Fable 8% remaining",
+       "Usage credits $157.85 of $400.00",
+     ]);
+     expect(container.querySelector(".context-usage__stats")).not.toBeNull();
+@@ -446,7 +452,7 @@ describe("renderChatComposer context usage", () => {
+       [...container.querySelectorAll(".context-usage__limit")].map((row) =>
+         row.textContent?.replace(/\s+/g, " ").trim(),
+       ),
+-    ).toEqual(["Weekly 25%"]);
++    ).toEqual(["Weekly 75% remaining"]);
+     expect(
+       [...container.querySelectorAll("[data-chat-usage-provider='true']")].map((row) =>
+         row.textContent?.replace(/\s+/g, " ").trim(),
+diff --git a/ui/src/pages/chat/components/chat-composer-context.ts b/ui/src/pages/chat/components/chat-composer-context.ts
+index 02f7c0a1..f3504185 100644
+--- a/ui/src/pages/chat/components/chat-composer-context.ts
++++ b/ui/src/pages/chat/components/chat-composer-context.ts
+@@ -3,18 +3,13 @@ import { asNullableObjectRecord as readCostRecord } from "@openclaw/normalizatio
+ import { html, nothing } from "lit";
+ import { isTranscriptOnlyOpenClawAssistantMessage } from "../../../../../src/shared/transcript-only-openclaw-assistant.js";
+ import type { GatewaySessionRow } from "../../../api/types.ts";
+-import { normalizeBasePath } from "../../../app-route-paths.ts";
+-import { icons } from "../../../components/icons.ts";
++import { renderProviderQuotaGroup } from "../../../components/provider-quota-card.ts";
+ import { t } from "../../../i18n/index.ts";
+ import { formatCompactTokenCount, formatCost } from "../../../lib/format.ts";
+ import { isMonitoredAuthProvider } from "../../../lib/model-auth.ts";
+ import {
+   collectProviderQuotaGroups,
+-  formatQuotaReset,
+-  type ProviderQuotaGroup,
+   type ProviderUsageDisplayProps,
+-  type QuotaBudgetSummary,
+-  type QuotaLimitSummary,
+ } from "../../../lib/provider-quota-summary.ts";
+ import { resolveSessionContextLimit } from "../../../lib/sessions/context-budget.ts";
+ import { handleChatComposerDetailsToggle } from "./chat-picker-overlay.ts";
+@@ -196,132 +191,6 @@ function getContextNoticeViewModel(
+ const RING_RADIUS = 6.5;
+ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+ 
+-// Provider window labels arrive as compact data strings ("5h", "Week"); model
+-// scoped labels (e.g. "Opus") pass through untranslated.
+-function formatUsageWindowLabel(label: string): string {
+-  if (label === "5h") {
+-    return t("chat.composer.contextUsage.limitFiveHour");
+-  }
+-  if (label === "Week") {
+-    return t("chat.composer.contextUsage.limitWeekly");
+-  }
+-  if (label === "Day") {
+-    return t("chat.composer.contextUsage.limitDaily");
+-  }
+-  const hours = /^(\d+)h$/.exec(label);
+-  if (hours) {
+-    return t("chat.composer.contextUsage.limitHours", { hours: hours[1] ?? "" });
+-  }
+-  return label;
+-}
+-
+-function formatBudgetAmount(amount: number, unit: string): string {
+-  if (/^[A-Za-z]{3}$/.test(unit)) {
+-    try {
+-      return new Intl.NumberFormat(undefined, {
+-        style: "currency",
+-        currency: unit.toUpperCase(),
+-        maximumFractionDigits: 2,
+-      }).format(amount);
+-    } catch {
+-      // Non-ISO currency codes fall through to plain unit suffix formatting.
+-    }
+-  }
+-  return `${amount.toFixed(2)} ${unit}`;
+-}
+-
+-function renderLimitBar(usedPercent: number, ariaLabel: string) {
+-  const severity = usedPercent >= 90 ? "danger" : usedPercent >= 75 ? "warn" : null;
+-  return html`
+-    <div
+-      class="context-usage__limit-bar"
+-      role="progressbar"
+-      aria-label=${ariaLabel}
+-      aria-valuemin="0"
+-      aria-valuemax="100"
+-      aria-valuenow=${usedPercent}
+-    >
+-      <span
+-        class=${severity ? `context-usage__limit-fill--${severity}` : ""}
+-        style="width: ${usedPercent}%"
+-      ></span>
+-    </div>
+-  `;
+-}
+-
+-function renderQuotaLimitRow(limit: QuotaLimitSummary) {
+-  const label = formatUsageWindowLabel(limit.label);
+-  const reset = formatQuotaReset(limit.resetAt);
+-  return html`
+-    <div class="context-usage__limit">
+-      <div class="context-usage__limit-head">
+-        <span class="context-usage__limit-label">${label}</span>
+-        <span class="context-usage__limit-meta">
+-          ${
+-            reset
+-              ? html`<span class="context-usage__limit-reset"
+-                  >${t("chat.composer.contextUsage.resets", { time: reset })}</span
+-                >`
+-              : nothing
+-          }
+-          <strong>${limit.usedPercent}%</strong>
+-        </span>
+-      </div>
+-      ${renderLimitBar(limit.usedPercent, label)}
+-    </div>
+-  `;
+-}
+-
+-function renderQuotaBudgetRow(budget: QuotaBudgetSummary) {
+-  const label = budget.label || t("chat.composer.contextUsage.usageCredits");
+-  const usedPercent = Math.max(0, Math.min(100, Math.round((budget.used / budget.limit) * 100)));
+-  const value = t("chat.composer.contextUsage.budgetValue", {
+-    used: formatBudgetAmount(budget.used, budget.unit),
+-    limit: formatBudgetAmount(budget.limit, budget.unit),
+-  });
+-  return html`
+-    <div class="context-usage__limit">
+-      <div class="context-usage__limit-head">
+-        <span class="context-usage__limit-label">${label}</span>
+-        <span class="context-usage__limit-meta"><strong>${value}</strong></span>
+-      </div>
+-      ${renderLimitBar(usedPercent, label)}
+-    </div>
+-  `;
+-}
+-
+-function renderQuotaGroup(group: ProviderQuotaGroup, usageHref: string) {
+-  return html`
+-    <div class="context-usage__section-label context-usage__plan-header">
+-      <span>${t("chat.composer.contextUsage.planUsage")}</span>
+-      <a
+-        class="context-usage__plan-link"
+-        href=${usageHref}
+-        data-chat-provider-usage="true"
+-        aria-label=${t("chat.composer.contextUsage.openUsage")}
+-      >
+-        ${group.plan ? html`<span class="context-usage__plan-badge">${group.plan}</span>` : nothing}
+-        ${icons.externalLink}
+-      </a>
+-    </div>
+-    ${
+-      group.accountEmail
+-        ? html`<div class="context-usage__account" data-chat-usage-account="true">
+-            ${group.accountEmail}
+-          </div>`
+-        : nothing
+-    }
+-    <div class="context-usage__limits">
+-      ${group.windows.map((limit) => renderQuotaLimitRow(limit))}
+-      ${group.budgets.map((budget) => renderQuotaBudgetRow(budget))}
+-    </div>
+-    <div class="context-usage__provenance" data-chat-usage-provider="true">
+-      <span>${t("sessionsView.provider")}:</span>
+-      <strong>${group.displayName}</strong>
+-    </div>
+-  `;
+-}
+-
+ export function renderContextNotice(
+   session: GatewaySessionRow | undefined,
+   defaultContextTokens: number | null,
+@@ -362,7 +231,6 @@ export function renderContextNotice(
+   // subscription resolves to subscription display (per-run credential
+   // attribution is #102807).
+   const showCosts = !currentGroup;
+-  const usageHref = `${normalizeBasePath(options.providerUsage?.basePath ?? "")}/usage`;
+   const formatStat = (value: number | null) =>
+     value === null ? t("usage.common.emptyValue") : formatCompactTokenCount(value);
+   const renderCostStat = (label: string, value: number | undefined) =>
+@@ -478,7 +346,7 @@ export function renderContextNotice(
+                 `
+               : nothing
+           }
+-          ${currentGroup ? renderQuotaGroup(currentGroup, usageHref) : nothing}
++          ${currentGroup ? renderProviderQuotaGroup(currentGroup, options.providerUsage?.basePath) : nothing}
+         </section>
+       </details>
+     </div>
+diff --git a/ui/src/styles/app-sidebar.css b/ui/src/styles/app-sidebar.css
+index a26bade1..ac0d5386 100644
+--- a/ui/src/styles/app-sidebar.css
++++ b/ui/src/styles/app-sidebar.css
+@@ -5,3 +5,23 @@
+   flex: 0 0 auto;
+   margin-inline: calc(-1 * var(--sidebar-pad-x));
+ }
++
++/* Preserve the navigation DOM order for pinned-session keyboard selection while
++   presenting the session list before native navigation in the visual sidebar. */
++.sidebar-shell__body {
++  display: flex;
++  flex-direction: column;
++}
++
++.sidebar-shell__sessions {
++  order: 1;
++  min-width: 0;
++}
++
++.sidebar-shell__body > .sidebar-nav {
++  order: 2;
++}
++
++.sidebar-shell__body > .sidebar-online {
++  order: 3;
++}
+diff --git a/ui/src/styles/chat/layout.css b/ui/src/styles/chat/layout.css
+index dfdc71bf..8c27c08f 100644
+--- a/ui/src/styles/chat/layout.css
++++ b/ui/src/styles/chat/layout.css
+@@ -1038,6 +1038,10 @@ openclaw-chat-page {
+   background: var(--accent);
+ }
+ 
++.context-usage__limit-bar span.context-usage__limit-fill--safe {
++  background: var(--ok);
++}
++
+ .context-usage__limit-bar span.context-usage__limit-fill--warn {
+   background: var(--warn);
+ }
+diff --git a/ui/src/test-helpers/app-sidebar.ts b/ui/src/test-helpers/app-sidebar.ts
+index 9f7a9361..db329859 100644
+--- a/ui/src/test-helpers/app-sidebar.ts
++++ b/ui/src/test-helpers/app-sidebar.ts
+@@ -130,6 +130,9 @@ export function createGatewayHarness(client: GatewayBrowserClient) {
+     if (method === "models.authStatus") {
+       return Promise.resolve({ ts: 0, providers: [] } as T);
+     }
++    if (method === "usage.status") {
++      return Promise.resolve({ updatedAt: 0, providers: [] } as T);
++    }
+     if (!originalRequest) {
+       return Promise.reject(new Error(`Unexpected sidebar gateway request: ${method}`));
+     }
+diff --git a/ui/src/components/provider-quota-card.test.ts b/ui/src/components/provider-quota-card.test.ts
+new file mode 100644
+index 00000000..8cf7b6b1
+--- /dev/null
++++ b/ui/src/components/provider-quota-card.test.ts
+@@ -0,0 +1,46 @@
++/* @vitest-environment jsdom */
++
++import { render } from "lit";
++import { afterEach, describe, expect, it } from "vitest";
++import { renderProviderQuotaGroup } from "./provider-quota-card.ts";
++
++const containers: HTMLElement[] = [];
++
++function renderQuota(usedPercent: number): HTMLElement {
++  const container = document.createElement("div");
++  containers.push(container);
++  render(
++    renderProviderQuotaGroup({
++      providers: ["openai"],
++      displayName: "OpenAI",
++      windows: [{ label: "Week", usedPercent }],
++      budgets: [],
++    }),
++    container,
++  );
++  return container;
++}
++
++afterEach(() => {
++  for (const container of containers.splice(0)) {
++    render(null, container);
++  }
++});
++
++describe("provider quota card", () => {
++  it.each([
++    { usedPercent: 1, remaining: 99, tone: "safe" },
++    { usedPercent: 60, remaining: 40, tone: "warn" },
++    { usedPercent: 90, remaining: 10, tone: "danger" },
++  ])("renders $remaining% remaining with the $tone quota state", ({ usedPercent, remaining, tone }) => {
++    const container = renderQuota(usedPercent);
++    const bar = container.querySelector<HTMLElement>(".context-usage__limit-bar");
++    const fill = bar?.querySelector<HTMLElement>("span");
++
++    expect(container.textContent?.replace(/\s+/g, " ").trim()).toContain(`${remaining}% remaining`);
++    expect(bar?.getAttribute("aria-valuenow")).toBe(String(remaining));
++    expect(bar?.getAttribute("aria-label")).toBe(`Weekly: ${remaining}% remaining`);
++    expect(fill?.classList.contains(`context-usage__limit-fill--${tone}`)).toBe(true);
++    expect(fill?.getAttribute("style")).toContain(`width: ${remaining}%`);
++  });
++});
+diff --git a/ui/src/components/provider-quota-card.ts b/ui/src/components/provider-quota-card.ts
+new file mode 100644
+index 00000000..57479d8d
+--- /dev/null
++++ b/ui/src/components/provider-quota-card.ts
+@@ -0,0 +1,157 @@
++import { html, nothing } from "lit";
++import { normalizeBasePath } from "../app-route-paths.ts";
++import { icons } from "./icons.ts";
++import { t } from "../i18n/index.ts";
++import {
++  formatQuotaReset,
++  type ProviderQuotaGroup,
++  type QuotaBudgetSummary,
++  type QuotaLimitSummary,
++} from "../lib/provider-quota-summary.ts";
++
++function formatUsageWindowLabel(label: string): string {
++  if (label === "5h") {
++    return t("chat.composer.contextUsage.limitFiveHour");
++  }
++  if (label === "Week") {
++    return t("chat.composer.contextUsage.limitWeekly");
++  }
++  if (label === "Day") {
++    return t("chat.composer.contextUsage.limitDaily");
++  }
++  const hours = /^(\d+)h$/.exec(label);
++  if (hours) {
++    return t("chat.composer.contextUsage.limitHours", { hours: hours[1] ?? "" });
++  }
++  return label;
++}
++
++function formatBudgetAmount(amount: number, unit: string): string {
++  if (/^[A-Za-z]{3}$/.test(unit)) {
++    try {
++      return new Intl.NumberFormat(undefined, {
++        style: "currency",
++        currency: unit.toUpperCase(),
++        maximumFractionDigits: 2,
++      }).format(amount);
++    } catch {
++      // Non-ISO currency codes fall through to plain unit suffix formatting.
++    }
++  }
++  return `${amount.toFixed(2)} ${unit}`;
++}
++
++function renderLimitBar(
++  valuePercent: number,
++  ariaLabel: string,
++  severity: "safe" | "warn" | "danger" | null,
++) {
++  return html`
++    <div
++      class="context-usage__limit-bar"
++      role="progressbar"
++      aria-label=${ariaLabel}
++      aria-valuemin="0"
++      aria-valuemax="100"
++      aria-valuenow=${valuePercent}
++    >
++      <span
++        class=${severity ? `context-usage__limit-fill--${severity}` : ""}
++        style="width: ${valuePercent}%"
++      ></span>
++    </div>
++  `;
++}
++
++function remainingQuotaSeverity(remainingPercent: number): "safe" | "warn" | "danger" {
++  return remainingPercent <= 20 ? "danger" : remainingPercent <= 50 ? "warn" : "safe";
++}
++
++function renderQuotaLimitRow(limit: QuotaLimitSummary, compactRemainingLabel: boolean) {
++  const label = formatUsageWindowLabel(limit.label);
++  const reset = formatQuotaReset(limit.resetAt);
++  const remainingPercent = 100 - limit.usedPercent;
++  const remainingLabel = `${remainingPercent}% remaining`;
++  const visibleRemainingLabel = compactRemainingLabel ? `${remainingPercent}%` : remainingLabel;
++  return html`
++    <div class="context-usage__limit">
++      <div class="context-usage__limit-head">
++        <span class="context-usage__limit-label">${label}</span>
++        <span class="context-usage__limit-meta">
++          ${
++            reset
++              ? html`<span class="context-usage__limit-reset"
++                  >${t("chat.composer.contextUsage.resets", { time: reset })}</span
++                >`
++              : nothing
++          }
++          <strong>${visibleRemainingLabel}</strong>
++        </span>
++      </div>
++      ${renderLimitBar(
++        remainingPercent,
++        `${label}: ${remainingLabel}`,
++        remainingQuotaSeverity(remainingPercent),
++      )}
++    </div>
++  `;
++}
++
++function renderQuotaBudgetRow(budget: QuotaBudgetSummary) {
++  const label = budget.label || t("chat.composer.contextUsage.usageCredits");
++  const usedPercent = Math.max(0, Math.min(100, Math.round((budget.used / budget.limit) * 100)));
++  const value = t("chat.composer.contextUsage.budgetValue", {
++    used: formatBudgetAmount(budget.used, budget.unit),
++    limit: formatBudgetAmount(budget.limit, budget.unit),
++  });
++  return html`
++    <div class="context-usage__limit">
++      <div class="context-usage__limit-head">
++        <span class="context-usage__limit-label">${label}</span>
++        <span class="context-usage__limit-meta"><strong>${value}</strong></span>
++      </div>
++      ${renderLimitBar(
++        usedPercent,
++        label,
++        usedPercent >= 90 ? "danger" : usedPercent >= 75 ? "warn" : null,
++      )}
++    </div>
++  `;
++}
++
++export function renderProviderQuotaGroup(
++  group: ProviderQuotaGroup,
++  basePath = "",
++  options: { compactRemainingLabel?: boolean } = {},
++) {
++  const usageHref = `${normalizeBasePath(basePath)}/usage`;
++  return html`
++    <div class="context-usage__section-label context-usage__plan-header">
++      <span>${t("chat.composer.contextUsage.planUsage")}</span>
++      <a
++        class="context-usage__plan-link"
++        href=${usageHref}
++        data-chat-provider-usage="true"
++        aria-label=${t("chat.composer.contextUsage.openUsage")}
++      >
++        ${group.plan ? html`<span class="context-usage__plan-badge">${group.plan}</span>` : nothing}
++        ${icons.externalLink}
++      </a>
++    </div>
++    ${
++      group.accountEmail
++        ? html`<div class="context-usage__account" data-chat-usage-account="true">
++            ${group.accountEmail}
++          </div>`
++        : nothing
++    }
++    <div class="context-usage__limits">
++      ${group.windows.map((limit) => renderQuotaLimitRow(limit, options.compactRemainingLabel === true))}
++      ${group.budgets.map((budget) => renderQuotaBudgetRow(budget))}
++    </div>
++    <div class="context-usage__provenance" data-chat-usage-provider="true">
++      <span>${t("sessionsView.provider")}:</span>
++      <strong>${group.displayName}</strong>
++    </div>
++  `;
++}
+diff --git a/ui/src/components/sidebar-plan-usage.test.ts b/ui/src/components/sidebar-plan-usage.test.ts
+new file mode 100644
+index 00000000..5a470589
+--- /dev/null
++++ b/ui/src/components/sidebar-plan-usage.test.ts
+@@ -0,0 +1,79 @@
++/* @vitest-environment jsdom */
++
++import { afterEach, describe, expect, it, vi } from "vitest";
++import type { GatewayBrowserClient } from "../api/gateway.ts";
++import "./sidebar-plan-usage.ts";
++
++type SidebarPlanUsageElement = HTMLElement & {
++  client: GatewayBrowserClient | null;
++  connected: boolean;
++  updateComplete: Promise<unknown>;
++};
++
++const mounted: HTMLElement[] = [];
++
++function providerUsage(usedPercent: number) {
++  return {
++    updatedAt: Date.now(),
++    providers: [
++      {
++        provider: "openai",
++        displayName: "OpenAI",
++        windows: [{ label: "Week", usedPercent }],
++      },
++    ],
++  };
++}
++
++afterEach(() => {
++  vi.useRealTimers();
++  for (const element of mounted.splice(0)) {
++    element.remove();
++  }
++  window.sessionStorage.clear();
++});
++
++describe("sidebar plan usage", () => {
++  it("keeps the last quota snapshot while the Gateway usage cache refreshes", async () => {
++    vi.useFakeTimers();
++    const client = {
++      request: vi
++        .fn()
++        .mockResolvedValueOnce(providerUsage(1))
++        .mockResolvedValueOnce({ updatedAt: Date.now(), providers: [], refreshing: true })
++        .mockResolvedValueOnce(providerUsage(2)),
++    } as unknown as GatewayBrowserClient;
++    const element = document.createElement("openclaw-sidebar-plan-usage") as SidebarPlanUsageElement;
++    mounted.push(element);
++    document.body.append(element);
++    element.client = client;
++    element.connected = true;
++
++    await vi.advanceTimersByTimeAsync(0);
++    await element.updateComplete;
++    expect(element.textContent?.replace(/\s+/g, " ").trim()).toContain("99%");
++
++    await (element as unknown as { refreshUsage: () => Promise<void> }).refreshUsage();
++    await element.updateComplete;
++    expect(element.textContent?.replace(/\s+/g, " ").trim()).toContain("99%");
++
++    await vi.advanceTimersByTimeAsync(1_000);
++    await element.updateComplete;
++    expect(element.textContent?.replace(/\s+/g, " ").trim()).toContain("98%");
++    expect(client.request).toHaveBeenCalledTimes(3);
++  });
++  it("hydrates the recent session snapshot before the Gateway request completes", async () => {
++    window.sessionStorage.setItem(
++      "openclaw.sidebar-plan-usage.v1",
++      JSON.stringify({ savedAt: Date.now(), summary: providerUsage(7) }),
++    );
++    const element = document.createElement("openclaw-sidebar-plan-usage") as SidebarPlanUsageElement;
++    mounted.push(element);
++    document.body.append(element);
++    await element.updateComplete;
++
++    expect(element.textContent?.replace(/\s+/g, " ").trim()).toContain("93%");
++    expect(element.textContent).not.toContain("remaining");
++  });
++
++});
+diff --git a/ui/src/components/sidebar-plan-usage.ts b/ui/src/components/sidebar-plan-usage.ts
+new file mode 100644
+index 00000000..6e2dd1c5
+--- /dev/null
++++ b/ui/src/components/sidebar-plan-usage.ts
+@@ -0,0 +1,201 @@
++import { html, nothing, type PropertyValues } from "lit";
++import { property, state } from "lit/decorators.js";
++import type { UsageSummary } from "../../../src/infra/provider-usage.types.js";
++import type { GatewayBrowserClient } from "../api/gateway.ts";
++import { t } from "../i18n/index.ts";
++import { OpenClawLightDomElement } from "../lit/openclaw-element.ts";
++import { PollController } from "../lit/poll-controller.ts";
++import { renderProviderQuotaGroup } from "./provider-quota-card.ts";
++import { collectProviderQuotaGroupsFromUsageSummary } from "../lib/provider-quota-summary.ts";
++import { IncompleteUsageRetry, isUsageIncomplete } from "../lib/incomplete-usage-retry.ts";
++import { requestProviderUsage } from "../lib/provider-usage-request.ts";
++import "../styles/sidebar-plan-usage.css";
++
++const REFRESH_INTERVAL_MS = 60_000;
++const CACHE_KEY = "openclaw.sidebar-plan-usage.v1";
++const CACHE_MAX_AGE_MS = 120_000;
++const CACHE_COLD_RETRY_MS = 1_000;
++const CACHE_COLD_RETRY_LIMIT = 5;
++
++type CachedUsageSummary = {
++  savedAt: number;
++  summary: UsageSummary;
++};
++
++function isCachedUsageSummary(value: unknown): value is CachedUsageSummary {
++  if (!value || typeof value !== "object") {
++    return false;
++  }
++  const cached = value as Partial<CachedUsageSummary>;
++  return (
++    typeof cached.savedAt === "number" &&
++    cached.summary !== null &&
++    typeof cached.summary === "object" &&
++    Array.isArray((cached.summary as { providers?: unknown }).providers) &&
++    !isUsageIncomplete(cached.summary)
++  );
++}
++
++function readCachedUsageSummary(): UsageSummary | null {
++  try {
++    const raw = window.sessionStorage.getItem(CACHE_KEY);
++    if (!raw) {
++      return null;
++    }
++    const cached: unknown = JSON.parse(raw);
++    if (!isCachedUsageSummary(cached) || Date.now() - cached.savedAt > CACHE_MAX_AGE_MS) {
++      window.sessionStorage.removeItem(CACHE_KEY);
++      return null;
++    }
++    return cached.summary;
++  } catch {
++    return null;
++  }
++}
++
++function cacheUsageSummary(summary: UsageSummary): void {
++  try {
++    window.sessionStorage.setItem(CACHE_KEY, JSON.stringify({ savedAt: Date.now(), summary }));
++  } catch {
++    // Storage can be unavailable or full; the live request remains authoritative.
++  }
++}
++
++function isOpenAiOrCodexQuotaProvider(providerId: string): boolean {
++  const normalized = providerId.trim().toLowerCase();
++  return normalized.includes("openai") || normalized.includes("codex");
++}
++
++class SidebarPlanUsage extends OpenClawLightDomElement {
++  @property({ attribute: false }) client: GatewayBrowserClient | null = null;
++  @property({ attribute: false }) connected = false;
++  @property({ attribute: false }) basePath = "";
++
++  @state() private usageSummary: UsageSummary | null = null;
++  @state() private unavailable = false;
++  private requestVersion = 0;
++  private abortController: AbortController | null = null;
++  private readonly incompleteUsageRetry = new IncompleteUsageRetry({
++    retry: () => this.refreshUsage(),
++    retryMs: CACHE_COLD_RETRY_MS,
++    limit: CACHE_COLD_RETRY_LIMIT,
++    onExhausted: () => {
++      if (!this.usageSummary) {
++        this.unavailable = true;
++      }
++    },
++  });
++  private readonly polling = new PollController(this, REFRESH_INTERVAL_MS, () => {
++    void this.refreshUsage();
++  }, false);
++
++  private readonly handleVisibilityChange = () => {
++    if (document.visibilityState === "visible") {
++      this.polling.start();
++      void this.refreshUsage();
++    } else {
++      this.polling.stop();
++    }
++  };
++
++  override connectedCallback() {
++    super.connectedCallback();
++    this.usageSummary ??= readCachedUsageSummary();
++    document.addEventListener("visibilitychange", this.handleVisibilityChange);
++    if (document.visibilityState === "visible") {
++      this.polling.start();
++    }
++    void this.refreshUsage();
++  }
++
++  override disconnectedCallback() {
++    document.removeEventListener("visibilitychange", this.handleVisibilityChange);
++    this.abortController?.abort();
++    this.abortController = null;
++    this.incompleteUsageRetry.dispose();
++    super.disconnectedCallback();
++  }
++
++  override updated(changed: PropertyValues<this>) {
++    super.updated(changed);
++    if (changed.has("client") || changed.has("connected")) {
++      if (!this.connected) {
++        this.incompleteUsageRetry.dispose();
++      }
++      void this.refreshUsage();
++    }
++  }
++
++  private async refreshUsage() {
++    if (!this.client || !this.connected || document.visibilityState !== "visible") {
++      return;
++    }
++    this.abortController?.abort();
++    const controller = new AbortController();
++    this.abortController = controller;
++    const client = this.client;
++    const requestVersion = ++this.requestVersion;
++    const ownsRequest = () =>
++      this.client === client &&
++      this.connected &&
++      this.requestVersion === requestVersion &&
++      !controller.signal.aborted;
++    try {
++      const result = await requestProviderUsage(client, { signal: controller.signal });
++      if (!ownsRequest()) {
++        return;
++      }
++      if (result.ok) {
++        // Gateway-capable clients receive an empty refreshing marker while its
++        // provider cache is cold. It is intentionally not a usable quota snapshot.
++        // Keep the last good data on screen and converge through the shared retry policy.
++        if (isUsageIncomplete(result.value)) {
++          this.unavailable = false;
++          this.incompleteUsageRetry.observe(true, client);
++          return;
++        }
++        this.usageSummary = result.value;
++        cacheUsageSummary(result.value);
++        this.unavailable = false;
++        this.incompleteUsageRetry.observe(false, client);
++      } else {
++        // A failed auxiliary refresh must never clear a successful snapshot.
++        this.unavailable = this.usageSummary === null;
++      }
++    } catch {
++      // Cancellation deliberately does not publish an error state. The latest
++      // successful snapshot stays visible while a reconnect/request races.
++      if (ownsRequest()) {
++        this.unavailable = this.usageSummary === null;
++      }
++    }
++  }
++
++  override render() {
++    const groups = collectProviderQuotaGroupsFromUsageSummary(this.usageSummary).filter((group) =>
++      group.providers.some(isOpenAiOrCodexQuotaProvider),
++    );
++    return html`
++      <section class="sidebar-plan-usage" aria-label=${t("chat.composer.contextUsage.planUsage")}>
++        ${
++          groups.length > 0
++            ? groups.map((group) =>
++                renderProviderQuotaGroup(group, this.basePath, { compactRemainingLabel: true }),
++              )
++            : html`<div class="context-usage__section-label">
++                ${t("chat.composer.contextUsage.planUsage")}
++              </div>`
++        }
++        ${this.unavailable && groups.length === 0
++          ? html`<div class="sidebar-plan-usage__unavailable" role="status">
++              ${t("usage.providerUsage.unavailable")}
++            </div>`
++          : nothing}
++      </section>
++    `;
++  }
++}
++
++if (!customElements.get("openclaw-sidebar-plan-usage")) {
++  customElements.define("openclaw-sidebar-plan-usage", SidebarPlanUsage);
++}
+diff --git a/ui/src/styles/sidebar-plan-usage.css b/ui/src/styles/sidebar-plan-usage.css
+new file mode 100644
+index 00000000..6b58cdd6
+--- /dev/null
++++ b/ui/src/styles/sidebar-plan-usage.css
+@@ -0,0 +1,151 @@
++openclaw-sidebar-plan-usage {
++  display: block;
++  flex: 0 0 auto;
++}
++
++.sidebar-plan-usage {
++  padding: 12px var(--sidebar-pad-x) 13px;
++  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
++}
++
++.sidebar-plan-usage .context-usage__section-label {
++  color: var(--muted);
++  font-size: 11px;
++  font-weight: 700;
++  letter-spacing: 0.08em;
++  line-height: 1.2;
++  text-transform: uppercase;
++}
++
++.sidebar-plan-usage .context-usage__plan-header {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 12px;
++}
++
++.sidebar-plan-usage .context-usage__plan-link {
++  display: inline-flex;
++  align-items: center;
++  gap: 6px;
++  color: var(--muted);
++  text-decoration: none;
++}
++
++.sidebar-plan-usage .context-usage__plan-link:hover {
++  color: var(--text);
++}
++
++.sidebar-plan-usage .context-usage__plan-link svg {
++  width: 12px;
++  height: 12px;
++}
++
++.sidebar-plan-usage .context-usage__plan-badge {
++  color: var(--text);
++  font-size: 11px;
++  font-weight: 650;
++  letter-spacing: 0.02em;
++  text-transform: none;
++}
++
++.sidebar-plan-usage .context-usage__account,
++.sidebar-plan-usage .context-usage__provenance {
++  overflow: hidden;
++  color: var(--muted);
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.sidebar-plan-usage .context-usage__account {
++  margin-top: 4px;
++  font-size: 12px;
++}
++
++.sidebar-plan-usage .context-usage__limits {
++  display: flex;
++  flex-direction: column;
++  gap: 11px;
++  margin-top: 12px;
++}
++
++.sidebar-plan-usage .context-usage__limit-head {
++  display: flex;
++  align-items: baseline;
++  justify-content: space-between;
++  gap: 12px;
++}
++
++.sidebar-plan-usage .context-usage__limit-label {
++  overflow: hidden;
++  color: var(--text);
++  font-size: 12px;
++  font-weight: 550;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++}
++
++.sidebar-plan-usage .context-usage__limit-meta {
++  display: inline-flex;
++  align-items: baseline;
++  gap: 8px;
++  color: var(--muted);
++  font-size: 11px;
++  white-space: nowrap;
++}
++
++.sidebar-plan-usage .context-usage__limit-meta strong {
++  color: var(--text);
++  font-size: 12px;
++  font-weight: 650;
++  font-variant-numeric: tabular-nums;
++}
++
++.sidebar-plan-usage .context-usage__limit-bar {
++  height: 4px;
++  margin-top: 6px;
++  overflow: hidden;
++  border-radius: var(--radius-full);
++  background: color-mix(in srgb, var(--muted) 20%, transparent);
++}
++
++.sidebar-plan-usage .context-usage__limit-bar span {
++  display: block;
++  height: 100%;
++  border-radius: inherit;
++  background: var(--accent);
++}
++
++.sidebar-plan-usage .context-usage__limit-bar span.context-usage__limit-fill--safe {
++  background: var(--ok);
++}
++
++.sidebar-plan-usage .context-usage__limit-bar span.context-usage__limit-fill--warn {
++  background: var(--warn);
++}
++
++.sidebar-plan-usage .context-usage__limit-bar span.context-usage__limit-fill--danger {
++  background: var(--danger);
++}
++
++.sidebar-plan-usage .context-usage__provenance {
++  margin-top: 12px;
++  font-size: 11px;
++}
++
++.sidebar-plan-usage .context-usage__provenance strong {
++  color: var(--text);
++  font-weight: 650;
++}
++
++.sidebar-plan-usage .context-usage__plan-header ~ .context-usage__plan-header {
++  margin-top: 14px;
++  padding-top: 14px;
++  border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
++}
++
++.sidebar-plan-usage__unavailable {
++  margin-top: 6px;
++  color: var(--muted);
++  font-size: 12px;
++}
