@@ -11,12 +11,12 @@ A small, maintainable overlay for the [OpenClaw Control UI](https://github.com/o
 
 ![OpenClaw Control UI with the Plan Usage sidebar card](docs/screenshots/plan-usage-sidebar.png)
 
-*Plan Usage stays pinned below the sidebar brand while the rest of the Control UI remains unchanged.*
+*Plan Usage stays pinned below the sidebar brand with a compact header rhythm, while the rest of the Control UI remains unchanged.*
 
 ## What it adds
 
 - Persistent sidebar Plan Usage card for OpenAI/Codex quota groups.
-- Clear quota capacity bar: green above 50%, yellow from 21–50%, red at 20% or below.
+- Clear remaining-capacity bar: green above 40%, yellow from 20–40%, red below 20%. The quota warning yellow is intentionally distinct from the theme's generic brown warning color.
 - Compact sidebar value such as `99%`; accessible labels retain the explicit “remaining” meaning.
 - Provider account email when supplied by the native usage response.
 - Instant re-render after browser reload from a recent browser-session snapshot, with a two-minute maximum age.

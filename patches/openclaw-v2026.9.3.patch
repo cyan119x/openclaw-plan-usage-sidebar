@@ -447,10 +447,10 @@ index a26bade1..ac0d5386 100644
 +  order: 3;
 +}
 diff --git a/ui/src/styles/chat/layout.css b/ui/src/styles/chat/layout.css
-index dfdc71bf..8c27c08f 100644
+index dfdc71bf..e6768184 100644
 --- a/ui/src/styles/chat/layout.css
 +++ b/ui/src/styles/chat/layout.css
-@@ -1038,6 +1038,10 @@ openclaw-chat-page {
+@@ -1038,10 +1038,20 @@ openclaw-chat-page {
    background: var(--accent);
  }
  
@@ -460,6 +460,16 @@ index dfdc71bf..8c27c08f 100644
 +
  .context-usage__limit-bar span.context-usage__limit-fill--warn {
    background: var(--warn);
+ }
+ 
++/* Provider quotas use remaining capacity, where yellow must remain visually
++   distinct from the danger red used below 20%. Keep budget warnings unchanged. */
++.context-usage__limit-bar--quota span.context-usage__limit-fill--warn {
++  background: #ca8a04;
++}
++
+ .context-usage__limit-bar span.context-usage__limit-fill--danger {
+   background: var(--danger);
  }
 diff --git a/ui/src/test-helpers/app-sidebar.ts b/ui/src/test-helpers/app-sidebar.ts
 index 9f7a9361..db329859 100644
@@ -477,10 +487,10 @@ index 9f7a9361..db329859 100644
      }
 diff --git a/ui/src/components/provider-quota-card.test.ts b/ui/src/components/provider-quota-card.test.ts
 new file mode 100644
-index 00000000..8cf7b6b1
+index 00000000..b8c76138
 --- /dev/null
 +++ b/ui/src/components/provider-quota-card.test.ts
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,48 @@
 +/* @vitest-environment jsdom */
 +
 +import { render } from "lit";
@@ -512,15 +522,17 @@ index 00000000..8cf7b6b1
 +
 +describe("provider quota card", () => {
 +  it.each([
-+    { usedPercent: 1, remaining: 99, tone: "safe" },
++    { usedPercent: 59, remaining: 41, tone: "safe" },
 +    { usedPercent: 60, remaining: 40, tone: "warn" },
-+    { usedPercent: 90, remaining: 10, tone: "danger" },
++    { usedPercent: 80, remaining: 20, tone: "warn" },
++    { usedPercent: 81, remaining: 19, tone: "danger" },
 +  ])("renders $remaining% remaining with the $tone quota state", ({ usedPercent, remaining, tone }) => {
 +    const container = renderQuota(usedPercent);
 +    const bar = container.querySelector<HTMLElement>(".context-usage__limit-bar");
 +    const fill = bar?.querySelector<HTMLElement>("span");
 +
 +    expect(container.textContent?.replace(/\s+/g, " ").trim()).toContain(`${remaining}% remaining`);
++    expect(bar?.classList.contains("context-usage__limit-bar--quota")).toBe(true);
 +    expect(bar?.getAttribute("aria-valuenow")).toBe(String(remaining));
 +    expect(bar?.getAttribute("aria-label")).toBe(`Weekly: ${remaining}% remaining`);
 +    expect(fill?.classList.contains(`context-usage__limit-fill--${tone}`)).toBe(true);
@@ -529,10 +541,10 @@ index 00000000..8cf7b6b1
 +});
 diff --git a/ui/src/components/provider-quota-card.ts b/ui/src/components/provider-quota-card.ts
 new file mode 100644
-index 00000000..57479d8d
+index 00000000..2806a892
 --- /dev/null
 +++ b/ui/src/components/provider-quota-card.ts
-@@ -0,0 +1,157 @@
+@@ -0,0 +1,159 @@
 +import { html, nothing } from "lit";
 +import { normalizeBasePath } from "../app-route-paths.ts";
 +import { icons } from "./icons.ts";
@@ -580,10 +592,11 @@ index 00000000..57479d8d
 +  valuePercent: number,
 +  ariaLabel: string,
 +  severity: "safe" | "warn" | "danger" | null,
++  isProviderQuota = false,
 +) {
 +  return html`
 +    <div
-+      class="context-usage__limit-bar"
++      class=${`context-usage__limit-bar${isProviderQuota ? " context-usage__limit-bar--quota" : ""}`}
 +      role="progressbar"
 +      aria-label=${ariaLabel}
 +      aria-valuemin="0"
@@ -599,7 +612,7 @@ index 00000000..57479d8d
 +}
 +
 +function remainingQuotaSeverity(remainingPercent: number): "safe" | "warn" | "danger" {
-+  return remainingPercent <= 20 ? "danger" : remainingPercent <= 50 ? "warn" : "safe";
++  return remainingPercent < 20 ? "danger" : remainingPercent <= 40 ? "warn" : "safe";
 +}
 +
 +function renderQuotaLimitRow(limit: QuotaLimitSummary, compactRemainingLabel: boolean) {
@@ -627,6 +640,7 @@ index 00000000..57479d8d
 +        remainingPercent,
 +        `${label}: ${remainingLabel}`,
 +        remainingQuotaSeverity(remainingPercent),
++        true,
 +      )}
 +    </div>
 +  `;
@@ -984,13 +998,16 @@ index 00000000..6e2dd1c5
 +}
 diff --git a/ui/src/styles/sidebar-plan-usage.css b/ui/src/styles/sidebar-plan-usage.css
 new file mode 100644
-index 00000000..6b58cdd6
+index 00000000..16c44c90
 --- /dev/null
 +++ b/ui/src/styles/sidebar-plan-usage.css
-@@ -0,0 +1,151 @@
+@@ -0,0 +1,156 @@
 +openclaw-sidebar-plan-usage {
 +  display: block;
 +  flex: 0 0 auto;
++  /* Align the utility's first heading with the sidebar's section rhythm
++     instead of leaving the header's reserved breathing room above it. */
++  margin-block-start: -24px;
 +}
 +
 +.sidebar-plan-usage {
@@ -1111,7 +1128,9 @@ index 00000000..6b58cdd6
 +}
 +
 +.sidebar-plan-usage .context-usage__limit-bar span.context-usage__limit-fill--warn {
-+  background: var(--warn);
++  /* The light-theme --warn token is intentionally brown for generic warnings.
++     Provider quota needs a distinct, legible yellow state. */
++  background: #ca8a04;
 +}
 +
 +.sidebar-plan-usage .context-usage__limit-bar span.context-usage__limit-fill--danger {
