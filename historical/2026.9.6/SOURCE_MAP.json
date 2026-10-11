@@ -1,0 +1,135 @@
+[
+  {
+    "sourceLabel": "primary",
+    "sourceRelativePath": "AGENTS.md",
+    "candidatePath": "AGENTS.md",
+    "sha256": "f62d5a4f5885682d2e420e034ffc8216d3b75f173b0e7ef066da34f2afb901cf",
+    "bytes": 903
+  },
+  {
+    "sourceLabel": "primary",
+    "sourceRelativePath": "CLAUDE.md",
+    "candidatePath": "CLAUDE.md",
+    "sha256": "336cc4fbf19beaada7ccf9986414fa91851a8d7a07dfb3ccbe800a69eed0ab49",
+    "bytes": 11
+  },
+  {
+    "sourceLabel": "variant",
+    "sourceRelativePath": "scripts/control-ui-mock-dev.ts",
+    "candidatePath": "historical/2026.9.6/source/scripts/control-ui-mock-dev.ts",
+    "sha256": "cdb817f0f23d2032131a26cbde7a536cc2c3f52cac589f7473637ba214cf374a",
+    "bytes": 133266
+  },
+  {
+    "sourceLabel": "variant",
+    "sourceRelativePath": "ui/src/components/app-sidebar.ts",
+    "candidatePath": "historical/2026.9.6/source/ui/src/components/app-sidebar.ts",
+    "sha256": "c4480baf3ee8de45afaa5451b698a7d8cb57383c03383440d09405735e33a7eb",
+    "bytes": 28347
+  },
+  {
+    "sourceLabel": "variant",
+    "sourceRelativePath": "ui/src/lib/provider-quota-summary.test.ts",
+    "candidatePath": "historical/2026.9.6/source/ui/src/lib/provider-quota-summary.test.ts",
+    "sha256": "3118e71328b988ce2fed7dfe947264872b4e50c931744e36fe46457724fae432",
+    "bytes": 6009
+  },
+  {
+    "sourceLabel": "variant",
+    "sourceRelativePath": "ui/src/lib/provider-quota-summary.ts",
+    "candidatePath": "historical/2026.9.6/source/ui/src/lib/provider-quota-summary.ts",
+    "sha256": "092eb7d178217ed642384bd32b43c331c0ab5aef5c4bc8f7170c87860e290cf9",
+    "bytes": 6781
+  },
+  {
+    "sourceLabel": "variant",
+    "sourceRelativePath": "ui/src/pages/chat/chat-composer-context.test.ts",
+    "candidatePath": "historical/2026.9.6/source/ui/src/pages/chat/chat-composer-context.test.ts",
+    "sha256": "b0bd272f7759409ba326b09235380ae9e9b690ffb7cc1fc909cc7e17d516b49f",
+    "bytes": 16356
+  },
+  {
+    "sourceLabel": "variant",
+    "sourceRelativePath": "ui/src/pages/chat/components/chat-composer-context.ts",
+    "candidatePath": "historical/2026.9.6/source/ui/src/pages/chat/components/chat-composer-context.ts",
+    "sha256": "366117fa9048f9f5be8d7cf47bb4dce61fe6108925e1e58eb0da5c98e7bbbfa4",
+    "bytes": 12859
+  },
+  {
+    "sourceLabel": "variant",
+    "sourceRelativePath": "ui/src/styles/app-sidebar.css",
+    "candidatePath": "historical/2026.9.6/source/ui/src/styles/app-sidebar.css",
+    "sha256": "3387bf2f8e05b676a6c539625f178cb5c9f9f6625dc15d9905e0c9dc3575ddb2",
+    "bytes": 1491
+  },
+  {
+    "sourceLabel": "variant",
+    "sourceRelativePath": "ui/src/styles/chat/layout.css",
+    "candidatePath": "historical/2026.9.6/source/ui/src/styles/chat/layout.css",
+    "sha256": "86b4de490481a6b0d42a0a5a5419d24c7b4db94cb71aa357ef129dd710f057fc",
+    "bytes": 70292
+  },
+  {
+    "sourceLabel": "variant",
+    "sourceRelativePath": "ui/src/test-helpers/app-sidebar.ts",
+    "candidatePath": "historical/2026.9.6/source/ui/src/test-helpers/app-sidebar.ts",
+    "sha256": "9fb3a70bed3d7412038bbafda373d6367d6a291c922bba094712fbf6f3300c70",
+    "bytes": 24353
+  },
+  {
+    "sourceLabel": "variant",
+    "sourceRelativePath": "ui/src/components/provider-quota-card.test.ts",
+    "candidatePath": "historical/2026.9.6/source/ui/src/components/provider-quota-card.test.ts",
+    "sha256": "6e4384d79edaa1a2673bc11238a4edea1ed578bb14110ad13063d3d865e07ab8",
+    "bytes": 1770
+  },
+  {
+    "sourceLabel": "variant",
+    "sourceRelativePath": "ui/src/components/provider-quota-card.ts",
+    "candidatePath": "historical/2026.9.6/source/ui/src/components/provider-quota-card.ts",
+    "sha256": "bf75f869d600cefdfbff67a5b2d055e4bf66cbf10bc69247225f7d112ab393e0",
+    "bytes": 5236
+  },
+  {
+    "sourceLabel": "variant",
+    "sourceRelativePath": "ui/src/components/sidebar-plan-usage.test.ts",
+    "candidatePath": "historical/2026.9.6/source/ui/src/components/sidebar-plan-usage.test.ts",
+    "sha256": "f6269f9d9d97167b5d5e807a37b2d0f833ce7f29699d8ed3029ac89e4bb236d7",
+    "bytes": 2610
+  },
+  {
+    "sourceLabel": "variant",
+    "sourceRelativePath": "ui/src/components/sidebar-plan-usage.ts",
+    "candidatePath": "historical/2026.9.6/source/ui/src/components/sidebar-plan-usage.ts",
+    "sha256": "b1c66156322f8e45ecb61cfd6da4841c26f896116961203d296e9daf22c16da3",
+    "bytes": 7054
+  },
+  {
+    "sourceLabel": "variant",
+    "sourceRelativePath": "ui/src/styles/sidebar-plan-usage.css",
+    "candidatePath": "historical/2026.9.6/source/ui/src/styles/sidebar-plan-usage.css",
+    "sha256": "366ef3ce9e58f5e064138d50c34c54318220755fb33ab9ba18c41bda4f1858f7",
+    "bytes": 3599
+  },
+  {
+    "sourceLabel": "variant",
+    "sourceRelativePath": "LICENSE",
+    "candidatePath": "historical/2026.9.6/LICENSE",
+    "sha256": "73571b25326281d369087f469842c02444fe39faaecebda4d82ed21ff3a1c29d",
+    "bytes": 1170
+  },
+  {
+    "sourceLabel": "variant",
+    "sourceRelativePath": "THIRD_PARTY_NOTICES.md",
+    "candidatePath": "historical/2026.9.6/THIRD_PARTY_NOTICES.md",
+    "sha256": "c1d1bbc550feee74853eba104e347341569cbbbe37a9f77659993ca0766277d5",
+    "bytes": 2855
+  },
+  {
+    "sourceLabel": "artifact",
+    "sourceRelativePath": "openclaw-plan-usage-2026.9.6-port.patch",
+    "candidatePath": "historical/2026.9.6/original-port.patch",
+    "sha256": "885bdf7b567096c098151ffc245f75a52c46c9fe59a16193a7c0a5e24a1de885",
+    "bytes": 19094
+  }
+]

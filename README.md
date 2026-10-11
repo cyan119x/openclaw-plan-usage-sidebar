@@ -113,3 +113,7 @@ The patch contains derived portions of OpenClaw, which is licensed under MIT. Th
 ## Contributing
 
 Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening an issue or pull request.
+
+## Source handoff and historical variant
+
+See [RECEIVING.md](RECEIVING.md) for project state, source coverage and the separately archived v2026.9.6 development variant. This does not change the supported version or authorize runtime deployment.
